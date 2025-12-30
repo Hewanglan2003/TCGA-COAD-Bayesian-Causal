@@ -1,0 +1,74 @@
+---
+title: "02_build_cohort"
+output: github_document
+---
+
+```{r}
+library(dplyr)
+library(stringr)
+library(readr)
+```
+
+Add treatment_outcome_first_course as the exposure factor in causal inference.
+
+```{r}
+cdr_coad <- readRDS("data/raw/TCGA-COAD.rds")
+
+cohort <- cdr_coad %>%
+    mutate(
+        response = tolower(treatment_outcome_first_course),
+        expo_good = case_when(
+            response %in% c("complete remission/response", "partial remission/response") ~ 1L,
+            response %in% c("progressive disease", "stable disease") ~ 0L,
+            TRUE ~ NA_integer_
+        )
+    ) %>%
+    filter(!is.na(expo_good))
+```
+
+Add PFI.time and PFI as outcomes.
+
+```{r}
+cohort <- cohort %>%
+    mutate(
+        time = PFI.time,
+        event = PFI
+    ) %>%
+    filter(!is.na(time), !is.na(event))
+```
+
+Add confounders.
+
+```{r}
+cohort <- cohort %>%
+    mutate(
+        age = as.numeric(age_at_initial_pathologic_diagnosis),
+        gender = tolower(gender),
+        stage = str_squish(coalesce(ajcc_pathologic_tumor_stage, clinical_stage))
+    ) %>%
+    filter(!is.na(age), !is.na(gender), !is.na(stage))
+```
+
+Keep the columns that need to be analyzed.
+
+```{r}
+cohort <- cohort %>%
+select(
+    bcr_patient_barcode,
+    expo_good,
+    time,
+    event,
+    age,
+    gender,
+    stage
+) %>%
+distinct()
+
+cat("N total:", nrow(cohort), "\n")
+cat("Expo good=1:", sum(cohort$expo_good == 1), "\n")
+cat("Expo good=0:", sum(cohort$expo_good == 0), "\n")
+```
+
+```{r}
+saveRDS(cohort, "data/processed/cohort_analysis_ready.rds")
+```
