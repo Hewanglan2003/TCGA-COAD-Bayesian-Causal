@@ -1,0 +1,105 @@
+---
+title: "03_ps_design"
+output: github_document
+---
+
+Use Logistic regression to ps score.
+
+```{r}
+library(dplyr)
+library(survival)
+
+coad <- readRDS("data/processed/cohort_analysis_ready.rds")
+
+ps_fit <- glm(
+    expo_good ~ age + gender + stage,
+    data = coad,
+    family = binomial()
+)
+
+coad$ps <- predict(ps_fit, type = "response")
+```
+
+Get the results of propensity score.
+
+```{r}
+summary_ps <- coad %>%
+    group_by(expo_good) %>%
+    summarise(
+        n = n(),
+        ps_min = min(ps),
+        ps_q25 = quantile(ps, 0.25),
+        ps_med = median(ps),
+        ps_q75 = quantile(ps, 0.75),
+        ps_max = max(ps)
+    )
+
+print(summary_ps)
+
+saveRDS(coad, "data/processed/cohort_with_ps.rds")
+```
+
+The results are not balanced so we need to apply the PS matching to have a pair of comparable samples.
+
+```{r}
+library(dplyr)
+library(MatchIt)
+
+coad_ps <- readRDS("data/processed/cohort_with_ps.rds")
+
+m <- matchit(
+    expo_good ~ age + gender + stage,
+    data = coad_ps,
+    method = "nearest",
+    ratio = 2,
+    distance = "logit",
+    caliper = 0.1
+)
+
+print(summary(m))
+
+matched <- match.data(m) %>%
+    select(bcr_patient_barcode, expo_good, time, event, age, gender, stage, ps, weights)
+
+saveRDS(matched, "data/processed/cohort_matched.rds")
+
+cat("\nMatched N total:", nrow(matched), "\n")
+cat("Matched expo_good=1:", sum(matched$expo_good == 1), "\n")
+cat("Matched expo_good=0:", sum(matched$expo_good == 0), "\n")
+```
+
+Balance check.
+
+```{r}
+library(dplyr)
+library(cobalt)
+
+pre <- readRDS("data/processed/cohort_with_ps.rds") %>%
+    select(expo_good, age, gender, stage)
+
+post <- readRDS("data/processed/cohort_matched.rds") %>%
+    select(expo_good, age, gender, stage, weights)
+
+bal_pre <- bal.tab(expo_good ~ age + gender + stage, data = pre, estimand = "ATT")
+bal_post <- bal.tab(expo_good ~ age + gender + stage, data = post, weights = post$weights, estimand = "ATT")
+
+cat("\n --- Balance BEFORE matching ---\n")
+print(bal_pre)
+
+cat("\n --- Balance BEFORE matching ---\n")
+print(bal_post)
+```
+
+The variable age needs extra attention(put age into the adjustment of the model)
+
+```{r}
+png("results/figures/loveplot_balance.png", width = 1400, height = 900, res = 150)
+love.plot(
+    m,
+    abs = TRUE,
+    thresholds = c(m = .1),
+    stats = "mean.diffs"
+)
+dev.off()
+```
+
