@@ -1,0 +1,26 @@
+---
+title: "01_download"
+output: github_document
+---
+
+```{r }
+cat("Current working directory:\n")
+print(getwd())
+cat("\n")
+```
+
+Download clinical data
+
+```{r}
+library(readxl)
+cdr <- read_xlsx("data/raw/TCGA-CDR-SupplementalTableS1.xlsx")
+cdr_coad <- subset(cdr, type == "COAD")
+saveRDS(cdr_coad, "data/raw/TCGA-COAD.rds")
+```
+
+```{r}
+colnames(cdr_coad)
+table(cdr_coad$type)
+table(cdr_coad$treatment_outcome_first_course)
+```
+
