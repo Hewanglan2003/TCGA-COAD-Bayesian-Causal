@@ -1,0 +1,145 @@
+---
+title: "04 bayes survival"
+output: github_document
+---
+
+```{r}
+coad <- readRDS("data/processed/cohort_matched.rds")
+```
+
+Bayesian AFT Weibull Survival
+PFI survival analysis
+
+```{r}
+library(survival)
+library(rstanarm)
+library(brms)
+
+fit <- brm(
+    time | cens(1 - event) ~ expo_good + age,
+    data = coad,
+    family = weibull(),
+    chains = 4, iter = 2000, seed = 123
+)
+
+summary(fit)
+```
+
+
+Calculate the time_ratio between two groups.
+
+```{r}
+post <- as.matrix(fit)
+time_ratio <- exp(post[, "b_expo_good"])
+
+quantile(time_ratio, c(0.025, 0.5, 0.975))
+mean(time_ratio > 1)
+```
+
+Check the results.
+
+```{r}
+table(coad$expo_good)
+if (is.factor(coad$expo_good)) levels(coad$expo_good)
+
+tapply(coad$time, coad$expo_good, summary)
+tapply(coad$event, coad$expo_good, mean)
+```
+
+```{r}
+posterior :: rhat(fit) |> summary()
+posterior :: ess_bulk(fit) |> summary()
+
+pp_check(fit, type = "ecdf_overlay")
+pp_check(fit, type = "dens_overlay")
+```
+
+
+
+```{r}
+res <- c(
+    lo = unname(quantile(time_ratio, 0.025)),
+    med = unname(quantile(time_ratio, 0.5)),
+    hi = unname(quantile(time_ratio, 0.975)),
+    p_gt1 = mean(time_ratio > 1)
+)
+res
+```
+
+Get the result figure of Bayesian AFT Weibull analysis.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+t_grid <- seq(0, quantile(coad$time, 0.95), length.out = 200)
+age0 <- median(coad$age, na.rm = TRUE)
+
+draws <- as.data.frame(as.matrix(fit))
+eta0 <- draws$b_Intercept + draws$b_expo_good*0 + draws$b_age*age0
+eta1 <- draws$b_Intercept + draws$b_expo_good*1 + draws$b_age*age0
+shape <- draws$shape
+
+S_fun <- function(t, eta, shape) exp(- (t / exp(eta))^shape)
+
+S0 <- sapply(t_grid, \(t) S_fun(t, eta0, shape))
+S1 <- sapply(t_grid, \(t) S_fun(t, eta1, shape))
+
+summ_S <- function(Smat){
+  tibble(
+    lo = apply(Smat, 2, quantile, 0.025),
+    md = apply(Smat, 2, quantile, 0.50),
+    hi = apply(Smat, 2, quantile, 0.975)
+  )
+}
+
+dfp <- bind_rows(
+  bind_cols(tibble(time=t_grid, group="expo_good=0"), summ_S(S0)),
+  bind_cols(tibble(time=t_grid, group="expo_good=1"), summ_S(S1))
+)
+
+p <- ggplot(dfp, aes(time, md, linetype=group)) +
+  geom_ribbon(aes(ymin=lo, ymax=hi, fill=group), alpha=0.2) +
+  geom_line(linewidth=1) +
+  labs(x="PFI time", y="Adjusted survival S(t)",
+       title="Bayesian Weibull AFT: adjusted survival curves (age fixed at median)") +
+  theme_bw()
+
+ggsave(
+  filename = "results/figures/adjusted_survival_curve.png",
+  plot = p,
+  width = 7, height = 5, dpi = 300
+)
+```
+
+Sensitivity Analysis
+```{r}
+library(survival)
+
+cox_fit <- coxph(Surv(time, event) ~ expo_good + age, data = coad)
+summary(cox_fit)
+
+exp(cbind(HR = coef(cox_fit), confint(cox_fit)))
+```
+
+Check the problemn of age overfitting
+```{r}
+fit_noage <- brm(
+  time | cens(1 - event) ~ expo_good,
+  data = coad,
+  family = weibull(),
+  chains = 4, iter = 4000,
+  control = list(adapt_delta = 0.95),
+  seed = 2025
+)
+```
+
+Check the results of the Bayesian regression without age.
+
+```{r}
+summary(fit_noage)
+post_na <- as.matrix(fit_noage)
+exp(post_na[, "b_expo_good"]) |> quantile(c(.025, .5, .975))
+```
+Although the primary Bayesian model exhibited low effective sample sizes, consistent findings across multiple sensitivity analyses suggest that the main conclusions are robust.
