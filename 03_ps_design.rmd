@@ -42,8 +42,9 @@ saveRDS(coad, "data/processed/cohort_with_ps.rds")
 The results are not balanced so we need to apply the PS matching to have a pair of comparable samples.
 
 ```{r}
-library(dplyr)
 library(MatchIt)
+library(cobalt)
+library(dplyr)
 
 coad_ps <- readRDS("data/processed/cohort_with_ps.rds")
 
@@ -93,6 +94,7 @@ print(bal_post)
 The variable age needs extra attention(put age into the adjustment of the model)
 
 ```{r}
+library(cobalt)
 png("results/figures/loveplot_balance.png", width = 1400, height = 900, res = 150)
 love.plot(
     m,
@@ -100,6 +102,6 @@ love.plot(
     thresholds = c(m = .1),
     stats = "mean.diffs"
 )
-dev.off()
+dev.off() 
 ```
 
